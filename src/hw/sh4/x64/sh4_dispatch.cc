@@ -28,7 +28,7 @@ extern "C" {
    RIP-relative offsets when calling functions */
 uint8_t sh4_code[CODE_SIZE];
 int sh4_code_size = CODE_SIZE;
-int sh4_stack_size = 1024;
+int sh4_stack_size = 4096;
 static void *sh4_cache[CACHE_SIZE];
 static int sh4_cache_size = CACHE_SIZE;
 static uint8_t sh4_dispatch[DISPATCH_SIZE];
@@ -62,7 +62,12 @@ static void sh4_dispatch_log(struct sh4_ctx *ctx) {
   static uint64_t num;
 
   if ((num++ % LOG_DISPATCH_EVERY_N) == 0) {
+#if 1
     LOG_INFO("sh4_log_dispatch 0x%08x", ctx->pc);
+#else
+    LOG_INFO("sh4_log_dispatch 0x%08x, avg ran %.2f", ctx->pc,
+             ctx->ran_instrs / (float)num);
+#endif
   }
 }
 #endif
@@ -164,7 +169,7 @@ void sh4_dispatch_init(void *sh4, void *jit, void *ctx, void *mem) {
 
     e.mov(arg0, (uint64_t)jit);
     e.mov(arg1, e.dword[e.r14 + offsetof(struct sh4_ctx, pc)]);
-    e.call(&jit_compile_block);
+    e.call(&jit_compile_code);
     e.jmp(sh4_dispatch_dynamic);
   }
 

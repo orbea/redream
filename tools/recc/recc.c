@@ -7,7 +7,7 @@
 #include "jit/jit.h"
 #include "jit/pass_stats.h"
 #include "jit/passes/constant_propagation_pass.h"
-#include "jit/passes/conversion_elimination_pass.h"
+#include "jit/passes/control_flow_analysis_pass.h"
 #include "jit/passes/dead_code_elimination_pass.h"
 #include "jit/passes/expression_simplification_pass.h"
 #include "jit/passes/load_store_elimination_pass.h"
@@ -15,16 +15,16 @@
 #include "sys/filesystem.h"
 
 DEFINE_OPTION_INT(help, 0, "Show help");
-DEFINE_OPTION_STRING(pass, "lse,cprop,cve,esimp,dce,ra",
+DEFINE_OPTION_STRING(pass, "cfa,lse,cprop,esimp,dce,ra",
                      "Comma-separated list of passes to run");
 
 DEFINE_STAT(ir_instrs_total, "total ir instructions");
 DEFINE_STAT(ir_instrs_removed, "removed ir instructions");
 
-static uint8_t ir_buffer[1024 * 1024];
+static uint8_t ir_buffer[1024 * 1024 * 8];
 static uint8_t code[1024 * 1024];
 static int code_size = sizeof(code);
-static int stack_size = 1024;
+static int stack_size = 4096;
 
 static int get_num_instrs(const struct ir *ir) {
   int n = 0;
@@ -42,16 +42,28 @@ static int get_num_instrs(const struct ir *ir) {
 static void sanitize_ir(struct ir *ir) {
   list_for_each_entry(block, &ir->blocks, struct ir_block, it) {
     list_for_each_entry(instr, &block->instrs, struct ir_instr, it) {
-      if (instr->op != OP_BRANCH && instr->op != OP_BRANCH_FALSE &&
-          instr->op != OP_BRANCH_TRUE && instr->op != OP_CALL &&
-          instr->op != OP_CALL_FALLBACK) {
-        continue;
+      int arg_index = -1;
+
+      if (instr->op == OP_BRANCH || instr->op == OP_CALL ||
+          instr->op == OP_CALL_FALLBACK) {
+        arg_index = 0;
+      } else if (instr->op == OP_BRANCH_FALSE || instr->op == OP_BRANCH_TRUE ||
+                 instr->op == OP_CALL_COND) {
+        arg_index = 1;
       }
 
-      /* ensure that address are within 2 GB of the code buffer */
-      uint64_t addr = instr->arg[0]->i64;
-      addr = (uint64_t)code | (addr & 0x7fffffff);
-      ir_set_arg0(ir, instr, ir_alloc_i64(ir, addr));
+      /* ensure that absolute address are within 2 GB of the code buffer */
+      struct ir_value *arg = NULL;
+
+      if (arg_index != -1) {
+        arg = instr->arg[arg_index];
+      }
+
+      if (arg && arg->type == VALUE_I64) {
+        uint64_t addr = arg->i64;
+        addr = (uint64_t)code | (addr & 0x7fffffff);
+        ir_set_arg(ir, instr, arg_index, ir_alloc_i64(ir, addr));
+      }
     }
   }
 }
@@ -80,10 +92,10 @@ static void process_file(struct jit *jit, const char *filename,
 
   char *name = strtok(passes, ",");
   while (name) {
-    if (!strcmp(name, "lse")) {
-      struct lse *lse = lse_create();
-      lse_run(lse, &ir);
-      lse_destroy(lse);
+    if (!strcmp(name, "cfa")) {
+      struct cfa *cfa = cfa_create();
+      cfa_run(cfa, &ir);
+      cfa_destroy(cfa);
     } else if (!strcmp(name, "cprop")) {
       struct cprop *cprop = cprop_create();
       cprop_run(cprop, &ir);
@@ -96,6 +108,10 @@ static void process_file(struct jit *jit, const char *filename,
       struct esimp *esimp = esimp_create();
       esimp_run(esimp, &ir);
       esimp_destroy(esimp);
+    } else if (!strcmp(name, "lse")) {
+      struct lse *lse = lse_create();
+      lse_run(lse, &ir);
+      lse_destroy(lse);
     } else if (!strcmp(name, "ra")) {
       struct ra *ra = ra_create(x64_registers, x64_num_registers);
       ra_run(ra, &ir);
@@ -119,17 +135,16 @@ static void process_file(struct jit *jit, const char *filename,
   int num_instrs_after = get_num_instrs(&ir);
 
   /* assemble backend code */
-  int host_size = 0;
-  uint8_t *host_code = NULL;
-
+  struct jit_code code;
   jit->backend->reset(jit->backend);
-  host_code = jit->backend->assemble_code(jit->backend, &ir, &host_size);
+  int res = jit->backend->assemble_code(jit->backend, &code, &ir);
+  CHECK(res);
 
   if (!disable_dumps) {
     LOG_INFO("===-----------------------------------------------------===");
     LOG_INFO("X64 code");
     LOG_INFO("===-----------------------------------------------------===");
-    jit->backend->dump_code(jit->backend, host_code, host_size);
+    jit->backend->dump_code(jit->backend, code.host_addr, code.host_size);
     LOG_INFO("");
   }
 

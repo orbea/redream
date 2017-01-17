@@ -189,13 +189,11 @@ set(REDREAM_SOURCES
   src/hw/scheduler.c
   src/jit/backend/x64/x64_backend.cc
   src/jit/backend/x64/x64_disassembler.c
-  src/jit/frontend/armv3/armv3_analyze.c
   src/jit/frontend/armv3/armv3_context.c
   src/jit/frontend/armv3/armv3_disasm.c
   src/jit/frontend/armv3/armv3_fallback.c
   src/jit/frontend/armv3/armv3_frontend.c
   src/jit/frontend/armv3/armv3_translate.c
-  src/jit/frontend/sh4/sh4_analyze.c
   src/jit/frontend/sh4/sh4_disasm.c
   src/jit/frontend/sh4/sh4_frontend.c
   src/jit/frontend/sh4/sh4_translate.c
@@ -363,8 +361,8 @@ set(TEST_ASM
   test/asm/ftrv.s
   test/asm/jmp.s
   test/asm/jsr.s
-  test/asm/ldc.s
-  test/asm/ldcl.s
+  #test/asm/ldc.s
+  #test/asm/ldcl.s
   test/asm/lds.s
   test/asm/ldsl.s
   test/asm/mova.s
